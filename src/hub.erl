@@ -68,51 +68,51 @@ parse_request([], #hub_request{verify=undefined}) ->
     {error, "Error: hub.topic is REQUIRED"};
 parse_request([], Request) ->
     Request;
-parse_request([{"hub.callback", Callback}|Rest], S) ->
+parse_request([{"hub.callback", Callback}|Rest], R) ->
     CallbackParsed = http_uri:parse(Callback),
     case CallbackParsed of
 	{error, _} ->
 	    {error, "Error: hub.callback '" ++ Callback ++
 	     "' is not valid URL"};
 	_ ->
-	    parse_request(Rest, S#hub_request{callback=CallbackParsed})
+	    parse_request(Rest, R#hub_request{callback=CallbackParsed})
     end;
-parse_request([{"hub.mode", Mode}|Rest], S) ->
+parse_request([{"hub.mode", Mode}|Rest], R) ->
     case Mode of
 	"subscribe" ->
-	    parse_request(Rest, S#hub_request{mode=subscribe});
+	    parse_request(Rest, R#hub_request{mode=subscribe});
 	"unsubscribe" ->
-	    parse_request(Rest, S#hub_request{mode=unsubscribe});
+	    parse_request(Rest, R#hub_request{mode=unsubscribe});
 	_ ->
 	    {error, "Error: hub.mode '" ++ Mode ++ "' not supported"}
     end;
-parse_request([{"hub.topic", Topic}|Rest], S) ->
+parse_request([{"hub.topic", Topic}|Rest], R) ->
     TopicParsed = http_uri:parse(Topic),
     case TopicParsed of
 	{error, _} ->
 	    {error, "Error: hub.topic '" ++ Topic ++ "' is not valid URL"};
 	_ ->
-	    parse_request(Rest, S#hub_request{callback=TopicParsed})
+	    parse_request(Rest, R#hub_request{callback=TopicParsed})
     end;
-parse_request([{"hub.verify", Verify}|Rest], S) ->
+parse_request([{"hub.verify", Verify}|Rest], R) ->
     case Verify of
 	"sync" ->
-	    parse_request(Rest, S#hub_request{verify=sync});
+	    parse_request(Rest, R#hub_request{verify=sync});
 	"async" ->
-	    parse_request(Rest, S#hub_request{verify=async});
+	    parse_request(Rest, R#hub_request{verify=async});
 	_ ->
 	    {error, "Error: hub.verify '" ++ Verify ++ "' not supported"}
     end;
-parse_request([{"hub.lease_seconds", LeaseSeconds}|Rest], S) ->
+parse_request([{"hub.lease_seconds", LeaseSeconds}|Rest], R) ->
     case LeaseSeconds of
 	"" ->
-	    parse_request(Rest, S#hub_request{lease_seconds=0});
+	    parse_request(Rest, R#hub_request{lease_seconds=0});
 	_ ->
 	    try list_to_integer(LeaseSeconds) of
 		_ ->
 		    parse_request(
 		      Rest,
-		      S#hub_request{
+		      R#hub_request{
 			lease_seconds=list_to_integer(LeaseSeconds)})
 	    catch
 		_:_ ->
@@ -120,12 +120,12 @@ parse_request([{"hub.lease_seconds", LeaseSeconds}|Rest], S) ->
 		     "' invalid value"}
 	    end
     end;
-parse_request([{"hub.secret", Secret}|Rest], S) ->
-    parse_request(Rest, S#hub_request{secret=Secret});
-parse_request([{"hub.verify_token", VerifyToken}|Rest], S) ->
-    parse_request(Rest, S#hub_request{verify_token=VerifyToken}).
+parse_request([{"hub.secret", Secret}|Rest], R) ->
+    parse_request(Rest, R#hub_request{secret=Secret});
+parse_request([{"hub.verify_token", VerifyToken}|Rest], R) ->
+    parse_request(Rest, R#hub_request{verify_token=VerifyToken}).
 
-verify_request(S) ->
+verify_subscription(S) ->
     case http:request(get, {S#hub_request.callback, []},
 		      [], []) of
 	{ok, {{_Version, 200, _ReasonPhrase}, _Headers, Body}} ->
