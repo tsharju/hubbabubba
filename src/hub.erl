@@ -1,10 +1,14 @@
 -module(hub).
 -author("teemu.harju@gmail.com").
 
--compile(export_all).
-%-export([start/1, loop/1]).
+%-compile(export_all).
+-export([start/1, stop/0, loop/1]).
 
 -include("hub.hrl").
+
+%-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+%-endif.
 
 -define(LOOP, {?MODULE, loop}).
 -define(INDEX_PAGE,
@@ -15,14 +19,19 @@
 	"<title>Hubbabubba - PubSubHubbub Hub</title>" ++
 	"</head>" ++
 	"<body>" ++
-	"<p>Hubbabubba</p>"
+	"<p>Hubbabubba server</p>"
 	"</body>" ++
 	"</html>").
 -define(HTTP_TIMEOUT, 3).
 
-start(Options = [{port, _Port}]) ->
+start(Options) ->
     inets:start(), % using the inets http client api
+    hub_storage:start(),
     mochiweb_http:start([{name, ?MODULE}, {loop, ?LOOP} | Options]).
+
+stop() ->
+    mochiweb_http:stop(?MODULE),
+    hub_storage:stop().
 
 loop(Req) ->
     "/" ++ Path = Req:get(path),
@@ -42,7 +51,16 @@ loop(Req) ->
 			    Req:respond({400, [], Description});
 			R ->
 			    case R#hub_request.mode of
-				subscribe ->
+				subscribe
+				when R#hub_request.verify =:= sync ->
+				    case verify_subscription(R) of
+					ok ->
+					    Req:respond({200, [], []});
+					_ ->
+					    Req:respond({500, [], []})
+				    end;
+				subscribe
+				when R#hub_request.verify =:= async ->
 				    Req:respond({200, [], []});
 				unsubscribe ->
 				    Req:respond({200, [], []})
@@ -125,11 +143,23 @@ parse_request([{"hub.secret", Secret}|Rest], R) ->
 parse_request([{"hub.verify_token", VerifyToken}|Rest], R) ->
     parse_request(Rest, R#hub_request{verify_token=VerifyToken}).
 
-verify_subscription(S) ->
-    case http:request(get, {S#hub_request.callback, []},
+verify_subscription(R = #hub_request{verify_token=VerifyToken}) ->
+    case http:request(get, {R#hub_request.callback, []},
 		      [], []) of
 	{ok, {{_Version, 200, _ReasonPhrase}, _Headers, Body}} ->
 	    io:format("~p~n", [Body]);
 	_ ->
 	    error
     end.
+
+url_to_string({Scheme, [], Host, Port, Path, Query}) ->
+    Url = atom_to_list(Scheme) ++ "://" ++ Host,
+    case Port of
+	80 when Scheme == http ->
+	    Url2 = Url;
+	443 when Scheme == https ->
+	    Url2 = Url;
+	_ ->
+	    Url2 = Url ++ integer_to_list(Port)
+    end,
+    Url2 ++ Path ++ Query.
