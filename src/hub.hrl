@@ -10,4 +10,5 @@
 		       topic,
 		       verified=false,
 		       lease_seconds=0,
-		       secret}).
+		       secret,
+		       verify_token}).

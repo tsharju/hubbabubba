@@ -1,8 +1,8 @@
 -module(hub).
 -author("teemu.harju@gmail.com").
 
-%-compile(export_all).
--export([start/1, stop/0, loop/1]).
+-compile(export_all).
+%-export([start/1, stop/0, loop/1]).
 
 -include("hub.hrl").
 
@@ -23,6 +23,9 @@
 	"</body>" ++
 	"</html>").
 -define(HTTP_TIMEOUT, 3).
+-define(CHALLENGE_CHARS,
+	"abcdefghijklmnopqrstuvxyzABCDEFHIJKLMNOPQRSTUVXYZ1234567890").
+-define(CHALLENGE_LENGTH, 32).
 
 start(Options) ->
     inets:start(), % using the inets http client api
@@ -51,19 +54,19 @@ loop(Req) ->
 			    Req:respond({400, [], Description});
 			R ->
 			    case R#hub_request.mode of
-				subscribe
-				when R#hub_request.verify =:= sync ->
-				    case verify_subscription(R) of
+				subscribe ->
+				    case subscribe(R) of
 					ok ->
-					    Req:respond({200, [], []});
-					_ ->
-					    Req:respond({500, [], []})
+					    Req:respond({204, [], []});
+					accepted ->
+					    Req:respond({202, [], []});
+					{bad_request, Msg} ->
+					    Req:respond({400, [], Msg});
+					{error, Msg} ->
+					    Req:respond({500, [], Msg})
 				    end;
-				subscribe
-				when R#hub_request.verify =:= async ->
-				    Req:respond({200, [], []});
 				unsubscribe ->
-				    Req:respond({200, [], []})
+				    Req:respond({501, [], []})
 			    end
 		    end;
 		_ ->
@@ -110,7 +113,7 @@ parse_request([{"hub.topic", Topic}|Rest], R) ->
 	{error, _} ->
 	    {error, "Error: hub.topic '" ++ Topic ++ "' is not valid URL"};
 	_ ->
-	    parse_request(Rest, R#hub_request{callback=TopicParsed})
+	    parse_request(Rest, R#hub_request{topic=TopicParsed})
     end;
 parse_request([{"hub.verify", Verify}|Rest], R) ->
     case Verify of
@@ -143,13 +146,56 @@ parse_request([{"hub.secret", Secret}|Rest], R) ->
 parse_request([{"hub.verify_token", VerifyToken}|Rest], R) ->
     parse_request(Rest, R#hub_request{verify_token=VerifyToken}).
 
-verify_subscription(R = #hub_request{verify_token=VerifyToken}) ->
-    case http:request(get, {R#hub_request.callback, []},
-		      [], []) of
+verify_subscription(Mode, S = #subscription{callback=Callback,
+					    topic=Topic,
+					    lease_seconds=LeaseSeconds,
+					    verify_token=VerifyToken}) ->
+    Challenge = get_challenge(),
+    Qs = mochiweb_util:urlencode([{"hub.mode", Mode},
+				  {"hub.topic", url_to_string(Topic)},
+				  {"hub.challenge", Challenge},
+				  {"hub.lease_seconds", LeaseSeconds},
+				  {"hub.verify_token", VerifyToken}]),
+    Url = append_qs(Callback, Qs),
+    case http:request(get,
+		      {url_to_string(Url), []}, [], []) of
 	{ok, {{_Version, 200, _ReasonPhrase}, _Headers, Body}} ->
-	    io:format("~p~n", [Body]);
+	    case Body =:= Challenge of
+		true ->
+		    {ok, S#subscription{verified=true}};
+		false ->
+		    {failed, "Echoed challenge is not equal to the original."}
+	    end;
 	_ ->
-	    error
+	    {error, "Could not verify the subscription."}
+    end.
+
+%%-----------------------------------------------------------------------------
+%% Function: get_challenge/0
+%% Purpose: Get a rangom string that can be used as a value for the challenge
+%%          when verifying subscriptions.
+%% Args: None.
+%% Returns: A string.
+%%-----------------------------------------------------------------------------
+get_challenge() ->
+    lists:foldl(fun(_, Acc) ->
+			[lists:nth(random:uniform(length(?CHALLENGE_CHARS)),
+				   ?CHALLENGE_CHARS)]
+			    ++ Acc
+		end, [], lists:seq(1, ?CHALLENGE_LENGTH)).
+
+%%-----------------------------------------------------------------------------
+%% Function: append_qs/2
+%% Purpose: Appends a query string to url that is a result of http:uri_parse.
+%% Args: The URL (tuple) and the query string (string).
+%% Returns: A string.
+%%-----------------------------------------------------------------------------
+append_qs({Scheme, [], Host, Port, Path, Query}, Qs) ->
+    case Query of
+	[] ->
+	    {Scheme, [], Host, Port, Path, "?" ++ Qs};
+	_ ->
+	    {Scheme, [], Host, Port, Path, Query ++ "&" ++ Qs}
     end.
 
 url_to_string({Scheme, [], Host, Port, Path, Query}) ->
@@ -160,6 +206,41 @@ url_to_string({Scheme, [], Host, Port, Path, Query}) ->
 	443 when Scheme == https ->
 	    Url2 = Url;
 	_ ->
-	    Url2 = Url ++ integer_to_list(Port)
+	    Url2 = Url ++ ":" ++ integer_to_list(Port)
     end,
     Url2 ++ Path ++ Query.
+
+url_to_string_test() ->
+    Url = "http://www.foobar.com/foobar.html",
+    UrlParsed = http_uri:parse(Url),
+    ?assert(url_to_string(UrlParsed) =:= Url),
+    Url2 = "http://www.foobar.com:8080/foobar.html",
+    UrlParsed2 = http_uri:parse(Url2),
+    ?assert(url_to_string(UrlParsed2) =:= Url2),
+    Url3 = "http://www.foobar.com/foobar.html?foo=bar",
+    UrlParsed3 = http_uri:parse(Url3),
+    ?assert(url_to_string(UrlParsed3) =:= Url3),
+    Url4 = "https://www.foobar.com/foobar.html?foo=bar",
+    UrlParsed4 = http_uri:parse(Url4),
+    ?assert(url_to_string(UrlParsed4) =:= Url4).
+
+
+subscribe(R) ->
+    S = #subscription{callback=R#hub_request.callback,
+		      topic=R#hub_request.topic,
+		      lease_seconds=R#hub_request.lease_seconds,
+		      secret=R#hub_request.secret,
+		      verify_token=R#hub_request.verify_token},
+    subscribe(R#hub_request.verify, S).
+
+subscribe(sync, S) ->
+    case verify_subscription(subscribe, S) of
+	{ok, S1} ->
+	    hub_storage:add_subscription(S1);
+	{failed, Msg} ->
+	    {bad_request, Msg};
+	{error, Msg} ->
+	    {error, Msg}
+    end;
+subscribe(async, S) ->
+    hub_storage:add_subscription(S).
