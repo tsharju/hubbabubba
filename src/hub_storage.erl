@@ -4,7 +4,8 @@
 -include("hub.hrl").
 -include_lib("stdlib/include/qlc.hrl").
 
--export([start/0, stop/0, add_subscription/1, get_subscriptions/0]).
+-export([start/0, stop/0, store_subscription/1,
+	 get_unverified_subscriptions/0, get_subscriptions/0]).
 
 start() ->
     mnesia:create_schema([node()]),
@@ -23,7 +24,7 @@ add(Row) ->
 	end,
     mnesia:transaction(F).
 
-add_subscription(S) ->
+store_subscription(S) ->
     case add(S) of
 	{atomic, ok} ->
 	    case S#subscription.verified of
@@ -38,6 +39,11 @@ add_subscription(S) ->
 	    {error, "Could not store subscription."}
     end.
 
+get_unverified_subscriptions() ->
+    do(qlc:q([X || X <- mnesia:table(subscription),
+		   X#subscription.verified =:= false,
+		   X#subscription.verifying =:= false])).
+
 get_subscriptions() ->
     do(qlc:q([X || X <- mnesia:table(subscription)])).
 
@@ -45,5 +51,9 @@ do(Q) ->
     F = fun() ->
 		qlc:e(Q)
 	end,
-    {atomic, Val} = mnesia:transaction(F),
-    Val.
+    case mnesia:transaction(F) of
+	{atomic, Val} ->
+	    Val;
+	{aborted, {no_exists, _}} ->
+	    []
+    end.

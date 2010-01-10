@@ -23,9 +23,6 @@
 	"</body>" ++
 	"</html>").
 -define(HTTP_TIMEOUT, 3).
--define(CHALLENGE_CHARS,
-	"abcdefghijklmnopqrstuvxyzABCDEFHIJKLMNOPQRSTUVXYZ1234567890").
--define(CHALLENGE_LENGTH, 32).
 
 start(Options) ->
     inets:start(), % using the inets http client api
@@ -49,12 +46,15 @@ loop(Req) ->
         'POST' ->
             case Path of
 		"" ->
-		    case parse_request(Req:parse_post()) of
+		    RequestArgs = Req:parse_post(),
+		    case parse_mode(RequestArgs) of
 			{error, Description} ->
 			    Req:respond({400, [], Description});
-			R ->
-			    case R#hub_request.mode of
-				subscribe ->
+			subscribe ->
+			    case parse_request(RequestArgs, subscribe) of
+				{error, Description} ->
+				    Req:respond({400, [], Description});
+				R ->
 				    case subscribe(R) of
 					ok ->
 					    Req:respond({204, [], []});
@@ -64,10 +64,26 @@ loop(Req) ->
 					    Req:respond({400, [], Msg});
 					{error, Msg} ->
 					    Req:respond({500, [], Msg})
-				    end;
-				unsubscribe ->
-				    Req:respond({501, [], []})
-			    end
+				    end
+			    end;
+			unsubscribe ->
+			    Req:respond({501, [], []});
+			publish ->
+			    case parse_request(RequestArgs, publish) of
+				{error, Description} ->
+				    Req:respond({400, [], Description});
+				R ->
+				    case publish(R#hub_request.url) of
+					ok ->
+					    Req:respond({204, [], []});
+					_ ->
+					    Req:respond({500, [], []})
+				    end
+			    end;
+			UnsupportedMode ->
+			    Req:respond({400, [], "Error: hub.mode '" ++
+					 atom_to_list(UnsupportedMode) ++
+					 "' is not supported"})
 		    end;
 		_ ->
 		    Req:not_found()
@@ -76,43 +92,38 @@ loop(Req) ->
             Req:respond({501, [], []})
     end.
 
-parse_request(Data) ->
-    parse_request(Data, #hub_request{}).
+parse_mode([{"hub.mode", Mode}|_Rest]) ->
+    list_to_atom(Mode);
+parse_mode([_|Rest]) ->
+    parse_mode(Rest);
+parse_mode([]) ->
+    {error, "Error: hub.mode is REQUIRED"}.
 
-parse_request([], #hub_request{topic=undefined}) ->
+parse_request(Data, Mode) when is_atom(Mode) ->
+    parse_request(Data, #hub_request{mode=Mode});
+parse_request([], #hub_request{topic=undefined, mode=subscribe}) ->
     {error, "Error: hub.topic is REQUIRED"};
-parse_request([], #hub_request{mode=undefined}) ->
-    {error, "Error: hub.topic is REQUIRED"};
-parse_request([], #hub_request{callback=undefined}) ->
-    {error, "Error: hub.topic is REQUIRED"};
-parse_request([], #hub_request{verify=undefined}) ->
-    {error, "Error: hub.topic is REQUIRED"};
+parse_request([], #hub_request{callback=undefined, mode=subscribe}) ->
+    {error, "Error: hub.callback is REQUIRED"};
+parse_request([], #hub_request{verify=undefined, mode=subscribe}) ->
+    {error, "Error: hub.verify is REQUIRED"};
+parse_request([], #hub_request{url=[], mode=publish}) ->
+    {error, "Error: hub.url is REQUIRED"};
 parse_request([], Request) ->
     Request;
 parse_request([{"hub.callback", Callback}|Rest], R) ->
-    CallbackParsed = http_uri:parse(Callback),
-    case CallbackParsed of
+    case http_uri:parse(Callback) of
 	{error, _} ->
 	    {error, "Error: hub.callback '" ++ Callback ++
 	     "' is not valid URL"};
-	_ ->
+	CallbackParsed ->
 	    parse_request(Rest, R#hub_request{callback=CallbackParsed})
     end;
-parse_request([{"hub.mode", Mode}|Rest], R) ->
-    case Mode of
-	"subscribe" ->
-	    parse_request(Rest, R#hub_request{mode=subscribe});
-	"unsubscribe" ->
-	    parse_request(Rest, R#hub_request{mode=unsubscribe});
-	_ ->
-	    {error, "Error: hub.mode '" ++ Mode ++ "' not supported"}
-    end;
 parse_request([{"hub.topic", Topic}|Rest], R) ->
-    TopicParsed = http_uri:parse(Topic),
-    case TopicParsed of
+    case http_uri:parse(Topic) of
 	{error, _} ->
 	    {error, "Error: hub.topic '" ++ Topic ++ "' is not valid URL"};
-	_ ->
+	TopicParsed ->
 	    parse_request(Rest, R#hub_request{topic=TopicParsed})
     end;
 parse_request([{"hub.verify", Verify}|Rest], R) ->
@@ -130,11 +141,9 @@ parse_request([{"hub.lease_seconds", LeaseSeconds}|Rest], R) ->
 	    parse_request(Rest, R#hub_request{lease_seconds=0});
 	_ ->
 	    try list_to_integer(LeaseSeconds) of
-		_ ->
-		    parse_request(
-		      Rest,
-		      R#hub_request{
-			lease_seconds=list_to_integer(LeaseSeconds)})
+		LeaseSeconds1 ->
+		    parse_request(Rest, R#hub_request{
+					  lease_seconds=LeaseSeconds1})
 	    catch
 		_:_ ->
 		    {error, "Error: hub.lease_seconds '" ++ LeaseSeconds ++
@@ -144,86 +153,24 @@ parse_request([{"hub.lease_seconds", LeaseSeconds}|Rest], R) ->
 parse_request([{"hub.secret", Secret}|Rest], R) ->
     parse_request(Rest, R#hub_request{secret=Secret});
 parse_request([{"hub.verify_token", VerifyToken}|Rest], R) ->
-    parse_request(Rest, R#hub_request{verify_token=VerifyToken}).
+    parse_request(Rest, R#hub_request{verify_token=VerifyToken});
+parse_request([{"hub.url", Url}|Rest], R) ->
+    case http_uri:parse(Url) of
+	{error, _} ->
+	    {error, "Error: hub.url '" ++ Url ++
+	     "' is not valid URL"};
+	UrlParsed ->
+	    Urls = lists:append(R#hub_request.url, [UrlParsed]),
+	    parse_request(Rest, R#hub_request{url=Urls})
+    end;
+parse_request([{_,_}|Rest], R) ->
+    parse_request(Rest, R).
 
-verify_subscription(Mode, S = #subscription{callback=Callback,
-					    topic=Topic,
-					    lease_seconds=LeaseSeconds,
-					    verify_token=VerifyToken}) ->
-    Challenge = get_challenge(),
-    Qs = mochiweb_util:urlencode([{"hub.mode", Mode},
-				  {"hub.topic", url_to_string(Topic)},
-				  {"hub.challenge", Challenge},
-				  {"hub.lease_seconds", LeaseSeconds},
-				  {"hub.verify_token", VerifyToken}]),
-    Url = append_qs(Callback, Qs),
-    case http:request(get,
-		      {url_to_string(Url), []}, [], []) of
-	{ok, {{_Version, 200, _ReasonPhrase}, _Headers, Body}} ->
-	    case Body =:= Challenge of
-		true ->
-		    {ok, S#subscription{verified=true}};
-		false ->
-		    {failed, "Echoed challenge is not equal to the original."}
-	    end;
-	_ ->
-	    {error, "Could not verify the subscription."}
-    end.
-
-%%-----------------------------------------------------------------------------
-%% Function: get_challenge/0
-%% Purpose: Get a rangom string that can be used as a value for the challenge
-%%          when verifying subscriptions.
-%% Args: None.
-%% Returns: A string.
-%%-----------------------------------------------------------------------------
-get_challenge() ->
-    lists:foldl(fun(_, Acc) ->
-			[lists:nth(random:uniform(length(?CHALLENGE_CHARS)),
-				   ?CHALLENGE_CHARS)]
-			    ++ Acc
-		end, [], lists:seq(1, ?CHALLENGE_LENGTH)).
-
-%%-----------------------------------------------------------------------------
-%% Function: append_qs/2
-%% Purpose: Appends a query string to url that is a result of http:uri_parse.
-%% Args: The URL (tuple) and the query string (string).
-%% Returns: A string.
-%%-----------------------------------------------------------------------------
-append_qs({Scheme, [], Host, Port, Path, Query}, Qs) ->
-    case Query of
-	[] ->
-	    {Scheme, [], Host, Port, Path, "?" ++ Qs};
-	_ ->
-	    {Scheme, [], Host, Port, Path, Query ++ "&" ++ Qs}
-    end.
-
-url_to_string({Scheme, [], Host, Port, Path, Query}) ->
-    Url = atom_to_list(Scheme) ++ "://" ++ Host,
-    case Port of
-	80 when Scheme == http ->
-	    Url2 = Url;
-	443 when Scheme == https ->
-	    Url2 = Url;
-	_ ->
-	    Url2 = Url ++ ":" ++ integer_to_list(Port)
-    end,
-    Url2 ++ Path ++ Query.
-
-url_to_string_test() ->
-    Url = "http://www.foobar.com/foobar.html",
-    UrlParsed = http_uri:parse(Url),
-    ?assert(url_to_string(UrlParsed) =:= Url),
-    Url2 = "http://www.foobar.com:8080/foobar.html",
-    UrlParsed2 = http_uri:parse(Url2),
-    ?assert(url_to_string(UrlParsed2) =:= Url2),
-    Url3 = "http://www.foobar.com/foobar.html?foo=bar",
-    UrlParsed3 = http_uri:parse(Url3),
-    ?assert(url_to_string(UrlParsed3) =:= Url3),
-    Url4 = "https://www.foobar.com/foobar.html?foo=bar",
-    UrlParsed4 = http_uri:parse(Url4),
-    ?assert(url_to_string(UrlParsed4) =:= Url4).
-
+publish([Url|Rest]) ->
+    % TODO: Implement the publish
+    publish(Rest);
+publish([]) ->
+    error.
 
 subscribe(R) ->
     S = #subscription{callback=R#hub_request.callback,
@@ -234,13 +181,38 @@ subscribe(R) ->
     subscribe(R#hub_request.verify, S).
 
 subscribe(sync, S) ->
-    case verify_subscription(subscribe, S) of
+    case hub_verifier:verify_subscription(subscribe, S) of
 	{ok, S1} ->
-	    hub_storage:add_subscription(S1);
+	    hub_storage:store_subscription(S1);
 	{failed, Msg} ->
 	    {bad_request, Msg};
 	{error, Msg} ->
 	    {error, Msg}
     end;
 subscribe(async, S) ->
-    hub_storage:add_subscription(S).
+    % we only store the subscription and it's verified by a background process
+    hub_storage:store_subscription(S).
+
+parse_mode_test() ->
+    ?assert(parse_mode([{"hub.mode", "publish"}]) =:= publish),
+    ?assert(parse_mode([]) =:= {error, "Error: hub.mode is REQUIRED"}).
+
+parse_publish_request_test() ->
+    Args = [{"hub.url", "http://www.feed.org/feed.xml"}],
+    Result = #hub_request{mode=publish,
+			  url=[{http, [], "www.feed.org", 80,
+				 "/feed.xml", []}]},
+    ?assert(parse_request(Args, publish) =:= Result).
+
+parse_subscribe_request_test() ->
+    Args = [{"hub.topic", "http://www.feed.org/feed.xml"},
+	    {"hub.callback", "http://www.service.org/callback"},
+	    {"hub.verify", "async"}],
+    Result = #hub_request{mode=subscribe,
+			  topic={http, [], "www.feed.org", 80,
+				 "/feed.xml", []},
+			  callback={http, [], "www.service.org", 80,
+				    "/callback", []},
+			  verify=async,
+			  lease_seconds=0},
+    ?assert(parse_request(Args, subscribe) =:= Result).
