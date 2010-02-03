@@ -27,6 +27,7 @@
 start(Options) ->
     inets:start(), % using the inets http client api
     hub_storage:start(),
+    hub_server:start_link(),
     mochiweb_http:start([{name, ?MODULE}, {loop, ?LOOP} | Options]).
 
 stop() ->
@@ -55,19 +56,30 @@ loop(Req) ->
 				{error, Description} ->
 				    Req:respond({400, [], Description});
 				R ->
-				    case subscribe(R) of
-					ok ->
-					    Req:respond({204, [], []});
-					accepted ->
-					    Req:respond({202, [], []});
-					{bad_request, Msg} ->
-					    Req:respond({400, [], Msg});
-					{error, Msg} ->
-					    Req:respond({500, [], Msg})
+				    case R#hub_request.verify of
+					sync ->
+					    Rsp = hub_server:subscribe_sync(
+						   R#hub_request.callback,
+						    R#hub_request.topic),
+					    case Rsp of
+						ok ->
+						    Req:respond({204, [], []});
+						{error, Code, Reason} ->
+						    Req:respond({Code, [], Reason})
+					    end;
+					async ->
+					    hub_server:subscribe_async(),
+					    Req:respond({202, [], []})
 				    end
 			    end;
 			unsubscribe ->
-			    Req:respond({501, [], []});
+			    Rsp = hub_server:unsubscribe("callback", "topic"),
+			    case Rsp of
+				ok ->
+				    Req:respond({204, [], []});
+				{error, {Code, Error}} ->
+				    Req:respond({Code, [], Error})
+			    end;
 			publish ->
 			    case parse_request(RequestArgs, publish) of
 				{error, Description} ->
