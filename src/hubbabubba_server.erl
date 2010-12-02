@@ -9,7 +9,7 @@
 -define(CHALLENGE_LENGTH, 32).
 
 %% API
--export([start_link/0, subscribe/3, generate_challenge/2]).
+-export([start_link/0, subscribe/6]).
 
 %% gen_server exports
 -export([init/1, handle_call/3, handle_cast/2,
@@ -22,10 +22,12 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-subscribe(async, CallbackURL, TopicURL) ->
-    gen_server:cast(?SERVER, {subscribe, CallbackURL, TopicURL});
-subscribe(sync, CallbackURL, TopicURL) ->
-    gen_server:call(?SERVER, {subscribe, CallbackURL, TopicURL}).
+subscribe(async, CallbackURL, TopicURL, LeaseSeconds, Secret, VerifyToken) ->
+    gen_server:cast(?SERVER, {subscribe, CallbackURL, TopicURL,
+			      LeaseSeconds, Secret, VerifyToken});
+subscribe(sync, CallbackURL, TopicURL, LeaseSeconds, Secret, VerifyToken) ->
+    gen_server:call(?SERVER, {subscribe, CallbackURL, TopicURL,
+			      LeaseSeconds, Secret, VerifyToken}).
 
 %% ------------------------------------------------------------------
 %% gen_server methods
@@ -34,7 +36,8 @@ subscribe(sync, CallbackURL, TopicURL) ->
 init(Args) ->
     {ok, Args}.
 
-handle_call({subscribe, CallbackURL, TopicURL}, _From, State) ->
+handle_call({subscribe, CallbackURL, TopicURL, _LeaseSeconds, _Secret,
+	     _VerifyToken}, _From, State) ->
     Reply = verify_subscription(CallbackURL, TopicURL),
     {reply, Reply, State}.
 

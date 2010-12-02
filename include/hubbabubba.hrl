@@ -1,6 +1,8 @@
 -record(request, {callback,
+		  callback_parsed,
 		  mode,
 		  topic,
+		  topic_parsed,
 		  verify,
 		  lease_seconds=0,
 		  secret,

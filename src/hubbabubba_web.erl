@@ -38,4 +38,5 @@ index() ->
 %% ===================================================================
 
 get_url_mappings() ->
-    [{[], hubbabubba_resource, []}].
+    [{[], hubbabubba_resource, []},
+     {["test", "callback"], hubbabubba_callback_resource, []}].

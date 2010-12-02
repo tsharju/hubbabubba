@@ -40,20 +40,22 @@ parse_request([], #request{verify=undefined, mode=subscribe}) ->
 parse_request([], #request{url=[], mode=publish}) ->
     {error, missing_url};
 parse_request([], Request) ->
-    Request;
+    {ok, Request};
 parse_request([{"hub.callback", Callback}|Rest], R) ->
     case http_uri:parse(Callback) of
 	{error, _} ->
 	    {error, invalid_callback};
 	CallbackParsed ->
-	    parse_request(Rest, R#request{callback=CallbackParsed})
+	    parse_request(Rest, R#request{callback=Callback,
+					  callback_parsed=CallbackParsed})
     end;
 parse_request([{"hub.topic", Topic}|Rest], R) ->
     case http_uri:parse(Topic) of
 	{error, _} ->
 	    {error, invalid_topic};
 	TopicParsed ->
-	    parse_request(Rest, R#request{topic=TopicParsed})
+	    parse_request(Rest, R#request{topic=Topic,
+					  topic_parsed=TopicParsed})
     end;
 parse_request([{"hub.verify", Verify}|Rest], R) ->
     case Verify of
@@ -95,6 +97,7 @@ parse_request([{_,_}|Rest], R) ->
 parse_arguments_parse_mode_test() ->
     ?assert(parse_arguments([]) =:= {error, missing_mode}),
     ?assert(parse_arguments([{"hub.mode", "foo"}]) =:= {error, invalid_mode}),
-    ?assert(parse_arguments([{"hub.mode", "publish"}]) =:= publish),
-    ?assert(parse_arguments([{"hub.mode", "subscribe"}]) =:= subscribe),
-    ?assert(parse_arguments([{"hub.mode", "unsubscribe"}]) =:= unsubscribe).
+    ?assert(parse_arguments([{"hub.mode", "publish"}]) =:= {error,
+							    missing_url}),
+    ?assert(parse_arguments([{"hub.mode", "subscribe"}]) =:= {error,
+							      missing_topic}).

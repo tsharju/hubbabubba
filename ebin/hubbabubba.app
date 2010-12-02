@@ -10,9 +10,11 @@
 	     hubbabubba_sup,
 	     hubbabubba_web,
 	     hubbabubba_resource,
+	     hubbabubba_callback_resource,
 	     hubbabubba_utils,
 	     hubbabubba_req_parser,
-	     hubbabubba_server
+	     hubbabubba_server,
+	     hubbabubba_error
 	    ]},
   {registered, []},
   {applications, [
