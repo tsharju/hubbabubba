@@ -1,10 +1,9 @@
 all:
-	(cd lib; $(MAKE))
-	(cd src; $(MAKE))
+	./rebar get-deps
+	./rebar compile
 
 clean:
-	(cd lib; $(MAKE) clean)
-	(cd src; $(MAKE) clean)
+	./rebar clean
 
-lib:
-	(cd lib; $(MAKE))
+distclean:
+	./rebar delete-deps

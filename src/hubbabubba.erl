@@ -1,21 +1,33 @@
 -module(hubbabubba).
--author("teemu.harju@gmail.com").
 
+%% API
 -export([start/0, stop/0]).
 
-ensure_started(App) ->    
-    case application:start(App) of
-        ok ->
-            ok;
-	{error, {already_started, App}} ->
-            ok
-    end.
+%% ===================================================================
+%% API
+%% ===================================================================
 
 start() ->
-    ensure_started(crypto),
+    ok = application:load(hubbabubba),
+    ok = start_deps(),
     application:start(hubbabubba).
 
 stop() ->
-    Res = application:stop(hubbabubba),
-    application:stop(crypto),
-    Res.
+    application:stop(hubbabubba).
+
+%% ===================================================================
+%% Internal API
+%% ===================================================================
+
+start_deps() ->
+    {ok, Deps} = application:get_key(hubbabubba, applications),
+    [ensure_started(App) || App <- Deps],
+    ok.
+
+ensure_started(App) ->
+    case application:start(App) of
+	ok ->
+	    ok;
+	{error, {already_started, App}} ->
+	    ok
+    end.
