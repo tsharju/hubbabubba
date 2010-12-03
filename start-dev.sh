@@ -1,7 +1,7 @@
 #!/bin/bash
 
 erl \
-    -pa ebin/ \
+    -pa apps/hubbabubba/ebin/ \
     -pa deps/ibrowse/ebin/ \
     -pa deps/mochiweb/ebin/ \
     -pa deps/webmachine/ebin/ \
