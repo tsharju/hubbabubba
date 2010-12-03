@@ -1,0 +1,8 @@
+deps
+apps/hubbabubba/ebin/*.beam
+apps/hubbabubba/ebin/*~
+apps/hubbabubba/src/*~
+apps/hubbabubba/include/*~
+rel/hubbabubba
+rel/*~
+*~
