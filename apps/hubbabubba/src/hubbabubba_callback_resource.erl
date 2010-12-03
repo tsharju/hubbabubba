@@ -19,19 +19,18 @@ content_types_provided(ReqData, Context) ->
 to_text(ReqData, Context) ->
     case wrq:get_qs_value("hub.challenge", ReqData) of
 	undefined ->
-	    hubbabubba_utils:error_response(400, "Missing challenge",
-					    ReqData, Context);
+	    hubbabubba_error:response(400, missing_challenge,
+				      ReqData, Context);
 	Challenge ->
 	    case wrq:get_qs_value("hub.mode", ReqData) of
 		undefined ->
-		    hubbabubba_utils:error_response(400, "Missing mode",
-						    ReqData, Context);
+		    hubbabubba_error:response(400, missing_mode,
+					      ReqData, Context);
 		_ ->
 		    case wrq:get_qs_value("hub.topic", ReqData) of
 			undefined ->
-			    hubbabubba_utils:error_response(400,
-							    "Missing Topic",
-							    ReqData, Context);
+			    hubbabubba_error:response(400, missing_topic,
+						      ReqData, Context);
 			_ ->
 			    {Challenge, ReqData, Context}
 		    end

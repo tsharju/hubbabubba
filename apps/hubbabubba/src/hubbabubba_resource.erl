@@ -50,42 +50,41 @@ process_form(ReqData, Context) ->
     Args = mochiweb_util:parse_qs(wrq:req_body(ReqData)),
     case hubbabubba_req_parser:parse_arguments(Args) of
 	{error, Reason} ->
-	    hubbabubba_utils:error_response(400, Reason, ReqData, Context);
+	    hubbabubba_error:response(400, Reason, ReqData, Context);
 	{ok, R} ->
-	    case R#request.mode of
-		subscribe ->
-		    case R#request.verify of
-			sync ->
-			    {ok, Status} =
-				hubbabubba_server:subscribe(sync,
-							    R#request.callback,
-							    R#request.topic,
-							    R#request.lease_seconds,
-							    R#request.secret,
-							    R#request.verify_token),
-			    ReqData1 = set_verify_token(ReqData, R),
-			    {true, ReqData1, Context};
-			async ->
-			    ok =
-				hubbabubba_server:subscribe(async,
-							    R#request.callback,
-							    R#request.topic,
-							    R#request.lease_seconds,
-							    R#request.secret,
-							    R#request.verify_token),
-			    ReqData1 = set_verify_token(ReqData, R),
-			    {true, ReqData1, Context}
-		    end;
-		unsubscribe ->
-		    hubbabubba_utils:error_response(501, not_implemented,
-						    ReqData, Context);
-		publish ->
-		    hubbabubba_utils:error_response(501, not_implemented,
-						    ReqData, Context)
-	    end
+	    process_request(R, ReqData, Context)
     end.
 
 set_verify_token(ReqData, R) when R#request.verify_token =:= undefined ->
     ReqData;
 set_verify_token(ReqData, R) ->
     wrq:set_resp_body(R#request.verify_token, ReqData).
+
+process_request(R, ReqData, Context) when R#request.mode =:= subscribe ->
+    case R#request.verify of
+	sync ->
+	    {ok, Status} =
+		hub_server:subscribe(sync,
+				     R#request.callback,
+				     R#request.topic,
+				     R#request.lease_seconds,
+				     R#request.secret,
+				     R#request.verify_token),
+	    ReqData1 = set_verify_token(ReqData, R),
+	    {true, ReqData1, Context};
+	async ->
+	    ok =
+		hub_server:subscribe(async,
+				     R#request.callback,
+				     R#request.topic,
+				     R#request.lease_seconds,
+				     R#request.secret,
+				     R#request.verify_token),
+	    ReqData1 = set_verify_token(ReqData, R),
+	    {true, ReqData1, Context}
+    end;
+process_request(R, ReqData, Context) when R#request.mode =:= unsubscribe ->
+    hubbabubba_error:response(501, not_implemented, ReqData, Context);
+process_request(R, ReqData, Context) when R#request.mode =:= publish ->
+    hubbabubba_error:response(501, not_implemented, ReqData, Context).
+
