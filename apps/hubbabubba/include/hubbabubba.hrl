@@ -8,3 +8,13 @@
 		  secret,
 		  verify_token,
 		  url=[]}).
+
+-record(subscription, {topic,
+		       topic_parsed,
+		       callback,
+		       callback_parsed,
+		       lease_seconds=0,
+		       secret,
+		       created,
+		       active=false,
+		       verified=false}).

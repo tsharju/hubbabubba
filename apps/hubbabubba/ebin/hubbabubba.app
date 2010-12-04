@@ -14,7 +14,9 @@
 	     hubbabubba_utils,
 	     hubbabubba_req_parser,
 	     hubbabubba_server,
-	     hubbabubba_error
+	     hubbabubba_error,
+	     hubbabubba_verifier,
+	     hubbabubba_sub_storage
 	    ]},
   {registered, []},
   {applications, [
